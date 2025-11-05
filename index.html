@@ -59,8 +59,10 @@
     </div>
 
     <script>
-        // Variabel Global untuk API Key. Di lingkungan ini, Canvas akan mengisinya secara otomatis.
-        const apiKey = "AIzaSyCQ7dTIs0O-vSpMe804tUBOw1raX7OykxE";
+        // PENTING: Jika aplikasi ini di-deploy secara publik di GitHub Pages,
+        // GANTI NILAI "" DENGAN API KEY GEMINI ASLI ANDA.
+        // PERINGATAN: API KEY ANDA AKAN TERLIHAT DI SOURCE CODE PUBLIK.
+        const apiKey = "AIzaSyCCPGAJrVa0Vk2jMq1Ur94rnUeSg5bbN7c"; // API Key telah disisipkan sesuai permintaan
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
 
         // Fungsi untuk mengkonfigurasi dan melakukan Fetch dengan Exponential Backoff
@@ -68,18 +70,24 @@
             for (let i = 0; i < maxRetries; i++) {
                 try {
                     const response = await fetch(url, options);
+                    
+                    // 429 - Too Many Requests / Rate Limit
                     if (response.status === 429 && i < maxRetries - 1) {
-                        // Jika Throttle (429), tunggu dan coba lagi
+                        // Tunggu dan coba lagi
                         const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
                         await new Promise(resolve => setTimeout(resolve, delay));
                         continue;
                     }
+                    
                     if (!response.ok) {
-                        throw new Error(`Permintaan API gagal dengan status: ${response.status}`);
+                        // Jika gagal setelah retries, lemparkan error dengan status
+                        const errorBody = await response.text();
+                        throw new Error(`Permintaan API gagal dengan status: ${response.status}. Detail: ${errorBody.substring(0, 100)}...`);
                     }
                     return response;
                 } catch (error) {
                     if (i === maxRetries - 1) {
+                        // Jika ini adalah retry terakhir dan masih gagal
                         throw error;
                     }
                     // Tunggu sebelum mencoba lagi
@@ -152,7 +160,19 @@
 
             } catch (error) {
                 console.error("Terjadi kesalahan:", error);
-                messageBox.textContent = `Terjadi kesalahan saat memanggil API: ${error.message}. Coba lagi nanti.`;
+                
+                let errorMessage = `Terjadi kesalahan saat memanggil API: ${error.message}. Coba lagi nanti.`;
+                
+                // Peningkatan penanganan error untuk 429 dan 401
+                if (error.message.includes('429')) {
+                    errorMessage = '⚠️ Batas Permintaan Terlampaui (429). Mohon tunggu 30 detik hingga 1 menit sebelum mencoba lagi, atau periksa batas kuota Anda di Google AI Studio.';
+                } else if (error.message.includes('401') || apiKey === "") {
+                    errorMessage = '🚫 Otorisasi Gagal (401). Pastikan Anda telah memasukkan API Key yang valid (bukan "") di file index.html jika aplikasi ini diakses secara publik.';
+                } else if (error.message.includes('400') || error.message.includes('403')) {
+                    errorMessage = 'Kesalahan Permintaan (400/403). Mungkin prompt Anda melanggar kebijakan konten. Coba ganti deskripsi.';
+                }
+                
+                messageBox.textContent = errorMessage;
                 messageBox.classList.remove('hidden');
             } finally {
                 // 6. Sembunyikan Loading dan Aktifkan Tombol
@@ -162,5 +182,4 @@
         }
     </script>
 </body>
-
 </html>
