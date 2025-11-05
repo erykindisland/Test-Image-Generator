@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generator Gambar AI Gemini</title>
+    <!-- Memuat Tailwind CSS untuk styling modern dan responsif -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Menggunakan font Inter untuk tampilan yang bersih */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Latar belakang abu-abu terang */
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div class="w-full max-w-4xl bg-white shadow-2xl rounded-xl p-6 md:p-10 transition-all duration-300">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">
+                Generator Gambar AI
+            </h1>
+            <p class="text-gray-600">Ditenagai oleh Imagen 3.0 via Gemini API</p>
+        </header>
+
+        <!-- Area Input Prompt -->
+        <div class="mb-6">
+            <label for="prompt" class="block text-sm font-medium text-gray-700 mb-2">Deskripsi Gambar (Prompt)</label>
+            <textarea id="prompt" rows="3" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150 shadow-sm"
+                      placeholder="Contoh: Seekor kucing astronot mengendarai sepeda di Mars dengan latar belakang galaksi yang indah, gaya seni digital."></textarea>
+        </div>
+
+        <!-- Tombol Generate -->
+        <div class="flex justify-center mb-8">
+            <button id="generateButton" onclick="generateImage()"
+                    class="px-6 py-3 bg-blue-600 text-white font-semibold rounded-full hover:bg-blue-700 transition duration-300 shadow-md hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                Buat Gambar
+            </button>
+        </div>
+
+        <!-- Indikator Loading & Output Gambar -->
+        <div id="loadingIndicator" class="text-center hidden p-4">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+            <p class="text-blue-600 font-medium">Membuat gambar... Mohon tunggu sebentar.</p>
+        </div>
+
+        <div id="imageContainer" class="mt-8">
+            <img id="generatedImage" src="" alt="Gambar yang dihasilkan AI"
+                 class="w-full rounded-lg shadow-xl border-4 border-gray-200 hidden mx-auto object-cover transition-opacity duration-500"
+                 style="max-height: 400px;"
+                 onerror="this.classList.add('hidden');">
+        </div>
+
+        <!-- Area Pesan/Error -->
+        <div id="messageBox" class="text-center mt-4 text-red-600 hidden p-3 bg-red-100 rounded-lg border border-red-300"></div>
+
+    </div>
+
+    <script>
+        // Variabel Global untuk API Key. Di lingkungan ini, Canvas akan mengisinya secara otomatis.
+        const apiKey = "";
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+
+        // Fungsi untuk mengkonfigurasi dan melakukan Fetch dengan Exponential Backoff
+        async function retryFetch(url, options, maxRetries = 5) {
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.status === 429 && i < maxRetries - 1) {
+                        // Jika Throttle (429), tunggu dan coba lagi
+                        const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    }
+                    if (!response.ok) {
+                        throw new Error(`Permintaan API gagal dengan status: ${response.status}`);
+                    }
+                    return response;
+                } catch (error) {
+                    if (i === maxRetries - 1) {
+                        throw error;
+                    }
+                    // Tunggu sebelum mencoba lagi
+                    const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+
+        async function generateImage() {
+            const prompt = document.getElementById('prompt').value.trim();
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const generatedImage = document.getElementById('generatedImage');
+            const generateButton = document.getElementById('generateButton');
+            const messageBox = document.getElementById('messageBox');
+
+            // 1. Validasi Input
+            messageBox.classList.add('hidden');
+            if (prompt.length < 10) {
+                messageBox.textContent = 'Deskripsi harus lebih panjang (minimal 10 karakter) agar hasilnya lebih baik.';
+                messageBox.classList.remove('hidden');
+                return;
+            }
+
+            // 2. Tampilkan Loading dan Nonaktifkan Tombol
+            loadingIndicator.classList.remove('hidden');
+            generatedImage.classList.add('hidden');
+            generateButton.disabled = true;
+
+            try {
+                // 3. Siapkan Payload untuk Imagen API
+                const payload = {
+                    instances: {
+                        prompt: prompt,
+                        // Parameter opsional, bisa dihilangkan jika ingin menggunakan default
+                        // number_of_images: 1,
+                        // aspect_ratio: "1:1",
+                    },
+                    parameters: {
+                        sampleCount: 1, // Kita hanya meminta 1 gambar
+                    }
+                };
+
+                const options = {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                };
+
+                // 4. Panggil API dengan Retry Logic
+                const response = await retryFetch(apiUrl, options);
+                const result = await response.json();
+
+                // 5. Ekstraksi Data Gambar
+                const base64Data = result?.predictions?.[0]?.bytesBase64Encoded;
+
+                if (base64Data) {
+                    // Buat URL data dari base64
+                    const imageUrl = `data:image/png;base64,${base64Data}`;
+                    
+                    // Tampilkan Gambar
+                    generatedImage.src = imageUrl;
+                    generatedImage.classList.remove('hidden');
+                } else {
+                    // Handle kasus jika API tidak mengembalikan gambar
+                    console.error("Respon API tidak mengandung data gambar:", result);
+                    messageBox.textContent = 'Gagal menghasilkan gambar. Mungkin deskripsi dilarang atau terjadi kesalahan API.';
+                    messageBox.classList.remove('hidden');
+                }
+
+            } catch (error) {
+                console.error("Terjadi kesalahan:", error);
+                messageBox.textContent = `Terjadi kesalahan saat memanggil API: ${error.message}. Coba lagi nanti.`;
+                messageBox.classList.remove('hidden');
+            } finally {
+                // 6. Sembunyikan Loading dan Aktifkan Tombol
+                loadingIndicator.classList.add('hidden');
+                generateButton.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
